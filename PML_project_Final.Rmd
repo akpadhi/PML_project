@@ -1,0 +1,158 @@
+---
+title: "Practical Machine Learning Project"
+author: "Akshaya Padhi"
+date: "April 30, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Prediction Assignment
+
+### Background
+Using devices such as JawboneUp, NikeFuelBand, and Fitbitit is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in
+their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+   
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).   
+
+### Preparing the data and R packages  
+
+#### Load packages 
+
+```{r, cache = F, message=FALSE, error=F, warning=F}
+library(gbm)
+library(survival)
+library(splines)
+library(parallel)
+library(plyr)
+library(dplyr);
+library(tidyr);
+library(ggplot2);
+library(caret);
+library(rpart);
+library(rpart.plot);
+library(RColorBrewer);
+library(rattle);
+library(randomForest);
+library(knitr); 
+library(corrplot)
+knitr::opts_chunk$set(cache=TRUE)
+```
+  
+
+#### Getting Data
+```{r cache = F, message=FALSE, error=F, warning=F}
+# URL of the training and testing data
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+#Data Download
+trainingData <- tbl_df(read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!","")))
+testingData <- tbl_df(read.csv(url(testUrl), na.strings=c("NA","#DIV/0!","")))
+dim(trainingData)
+dim(testingData)
+```  
+
+The raw training data has 19622 rows of observations and 158 features (predictors). Column `X` is unusable row number. While the testing data has 20 rows and the same 158 features. There is one column of target outcome named `classe`.   
+
+#### Data cleaning
+
+* First, Thake the colums with 70% or more NA values.  
+* Take out the columns with Near Zero Variance.  
+* After that Remove the fist six columns whish are not predictors.
+* Keep only the selected columns in the test data. Ofcousre take out the outcome column from Test data.
+
+```{r cache = F, message=FALSE, error=F, warning=F}
+training<-trainingData[,colMeans(is.na(trainingData)) < 0.7] # Columns with >70% NA values 
+nzv <- nearZeroVar(training, saveMetrics=TRUE)    
+training <- training[,nzv$nzv==FALSE]           # Remove NearZero variance predictors
+training <- training[ , -c(1:6)]                      # Remove Non- prediction columns
+testData<- testingData[, colnames(training[ , -53])]      # Keep only prediciton columns in TestData
+dim(training)
+dim(testData)
+```
+
+### Build machine learning model 
+
+Now build a machine learning model to predict activity quality (`classe` outcome) from the activity monitors (the features or predictors)   
+
+##### Data prep
+```{r cache = F, message=FALSE, error=F, warning=F}
+# convert data to matrix
+set.seed(825)
+inTrain <- createDataPartition(training$classe, p=0.7, list=FALSE)
+myTraining <- training[inTrain, ]
+myValidation <- training[-inTrain, ]
+dim(myTraining); dim(myValidation)
+```
+
+#### Prediction Models
+##### Prediction Models: LDA
+
+```{r cache = F, message=FALSE, error=F, warning=F}
+fitControl <- trainControl(method = "repeatedcv",number = 5,repeats = 1)
+modLda <- train(classe~., method="lda", data = myTraining, trControl = fitControl,
+                      verbose = FALSE)
+predLda <- predict(modLda, newdata=myValidation)
+confMatLda <- confusionMatrix(predLda, myValidation$classe)
+accuracyLda<-round(confMatLda$overall[1], 3);
+outOfSampErrLda<- round(1- confMatLda$overall[1], 3)
+writeLines("Accuracy and Out of sample Error \n")
+paste("Accuracy = ", accuracyLda)
+paste("Out of Sample Error =", outOfSampErrLda)
+writeLines("\n Prediction Table \n")
+confMatLda$table
+```
+##### Prediction Models: GBM
+
+```{r  cache = F, message=FALSE, error=F, warning=F}
+modGbm <- train(classe ~ ., data=myTraining, method = "gbm",
+                trControl = fitControl,
+                verbose = FALSE)
+
+predGbm <- predict(modGbm, newdata=myValidation)
+confMatGbm <- confusionMatrix(predGbm, myValidation$classe)
+accuracyGbm<-round(confMatGbm$overall[1], 3);
+outOfSampErrGbm<- round(1- confMatGbm$overall[1], 3)
+writeLines("Accuracy and Out of sample Error \n")
+paste("Accuracy = ", accuracyGbm)
+paste("Out of Sample Error =", outOfSampErrGbm)
+writeLines("\n Prediction Table \n")
+confMatGbm$table
+```
+```{r  cache = F, message=FALSE, error=F, warning=F}
+plot(modGbm)
+```
+
+
+```{r cache = F, message=FALSE, error=F, warning=F}
+set.seed(825)
+modRf <- randomForest(classe~., data = myTraining, trControl = fitControl,
+                      verbose = FALSE)
+predRf<-predict(modRf, myValidation)
+confMatRf <- confusionMatrix(predRf, myValidation$classe)
+accuracyRf<-round(confMatRf$overall[1], 3);
+outOfSampErrRf<- round(1- confMatRf$overall[1], 3)
+
+writeLines("\n Accuracy and Out of sample Error \n")
+paste("Accuracy = ", accuracyRf)
+paste("Out of Sample Error =", outOfSampErrRf)
+writeLines("\n Prediction Table \n")
+confMatRf$table
+```
+
+```{r   cache = F, message=FALSE, error=F, warning=F}
+plot(modRf)
+```
+
+#### Predicting the testing data
+
+Random Forests gave an Accuracy in the myValidation dataset of 99.995%, which was more accurate than we got from the LDA or GBM. The expected out-of-sample error is 100-99.995 = 0.005%.
+
+```{r  cache = F, message=FALSE, error=F, warning=F}
+predRf <- predict(modRf, testData)
+predRf
+```
+  
